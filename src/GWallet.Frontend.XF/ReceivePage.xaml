@@ -11,11 +11,6 @@
         <Label x:Name="fiatBalanceLabel"
                Text="..."
                HorizontalOptions="Center" />
-        <Button x:Name="paymentButton"
-                Text="..."
-                IsEnabled="false"
-                HorizontalOptions="Center"
-                Clicked="OnSendPaymentClicked"/>
         <Button x:Name="copyToClipboardButton"
                 Text="Copy address to clipboard"
                 IsEnabled="true"

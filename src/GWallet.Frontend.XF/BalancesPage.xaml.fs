@@ -26,11 +26,8 @@ type TotalBalance =
     static member (+) (x: decimal, y: TotalBalance) =
         y + x
 
-type BalancesPage(state: FrontendHelpers.IGlobalAppState,
-                  normalAccountsAndBalances: seq<BalanceState>,
-                  readOnlyAccountsAndBalances: seq<BalanceState>,
-                  currencyImages: Map<Currency*bool,Image>,
-                  startWithReadOnlyAccounts: bool)
+type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
+                  currencyImages: Map<Currency*bool,Image>)
                       as this =
     inherit ContentPage()
 
@@ -194,8 +191,7 @@ type BalancesPage(state: FrontendHelpers.IGlobalAppState,
         this.Init()
 
     [<Obsolete(DummyPageConstructorHelper.Warning)>]
-    new() = BalancesPage(DummyPageConstructorHelper.GlobalFuncToRaiseExceptionIfUsedAtRuntime(),Seq.empty,Seq.empty,
-                         Map.empty,false)
+    new() = BalancesPage(Seq.empty,Map.empty)
 
     member private this.LastRefreshBalancesStamp
         with get() = lock lockObject (fun _ -> lastRefreshBalancesStamp)
@@ -339,214 +335,8 @@ type BalancesPage(state: FrontendHelpers.IGlobalAppState,
                 ) |> Some
         }
 
-    member private this.RefreshBalances (onlyReadOnlyAccounts: bool) =
-        // we don't mind to be non-fast because it's refreshing in the background anyway
-        let refreshMode = Mode.Analysis
-
-        let readOnlyCancelSources,readOnlyBalancesJob =
-            FrontendHelpers.UpdateBalancesAsync (readOnlyAccountsAndBalances.Select(fun balanceState ->
-                                                                                        balanceState.BalanceSet))
-                                                false refreshMode
-
-        let readOnlyAccountsBalanceUpdate =
-            this.UpdateGlobalBalance state readOnlyBalancesJob totalReadOnlyFiatAmountLabel readonlyChartView
-
-        let allCancelSources,allBalanceUpdates =
-            if (not onlyReadOnlyAccounts) then
-
-                let normalCancelSources,normalBalancesJob =
-                    FrontendHelpers.UpdateBalancesAsync (normalAccountsAndBalances.Select(fun balState ->
-                                                                                              balState.BalanceSet))
-                                                        false refreshMode
-
-                let normalAccountsBalanceUpdate =
-                    this.UpdateGlobalBalance state normalBalancesJob totalFiatAmountLabel normalChartView
-
-                let allCancelSources = Seq.append readOnlyCancelSources normalCancelSources
-
-                let allJobs = Async.Parallel([normalAccountsBalanceUpdate; readOnlyAccountsBalanceUpdate])
-                Seq.append readOnlyCancelSources normalCancelSources,allJobs
-            else
-                readOnlyCancelSources,Async.Parallel([readOnlyAccountsBalanceUpdate])
-                
-        this.BalanceRefreshCancelSources <- allCancelSources
-
-        async {
-            try
-                let! balanceUpdates = allBalanceUpdates
-                if balanceUpdates.Any(fun maybeImminentIncomingPayment ->
-                    Option.exists id maybeImminentIncomingPayment
-                ) then
-                    this.NoImminentIncomingPayment <- false
-                elif (not onlyReadOnlyAccounts) &&
-                      balanceUpdates.All(fun maybeImminentIncomingPayment ->
-                    Option.exists not maybeImminentIncomingPayment
-                ) then
-                    this.NoImminentIncomingPayment <- true
-            with
-            | ex ->
-                if not (FSharpUtil.FindException<TaskCanceledException> ex).IsSome then
-                    raise <| FSharpUtil.ReRaise ex
-        }
-
-    member private this.StartTimer(): unit =
-        let prevRefreshTime,_ = this.LastRefreshBalancesStamp
-        let cancelSource = new CancellationTokenSource()
-        let cancellationToken = cancelSource.Token
-        this.LastRefreshBalancesStamp <- prevRefreshTime,cancelSource
-
-
-        let refreshesDiff = DateTime.UtcNow - prevRefreshTime
-        let shiftedRefreshDiff =
-            if refreshesDiff > TimeSpan.Zero then
-                refreshesDiff
-            else
-                TimeSpan.Zero
-
-        let baseRefreshInterval = GetBaseRefreshInterval()
-        let refreshInterval = baseRefreshInterval - shiftedRefreshDiff
-        let timerInterval =
-            if refreshInterval > TimeSpan.Zero then
-                refreshInterval
-            else
-                //Avoid cases when user changes timezone in device settings
-                TimeSpan.Zero
-                
-        Device.StartTimer(timerInterval + timerStartDelay, fun _ ->
-            if not cancellationToken.IsCancellationRequested then
-                async {
-                    try
-                        cancellationToken.ThrowIfCancellationRequested()
-                        do! this.RefreshBalances false
-                        cancellationToken.ThrowIfCancellationRequested()
-                        this.LastRefreshBalancesStamp <- DateTime.UtcNow,cancelSource
-                        this.StartTimer()
-                    with
-                    | :? OperationCanceledException ->
-                        raise <| TaskCanceledException()
-
-                } |> FrontendHelpers.DoubleCheckCompletionAsync
-            false
-        )
-
-    member private this.StopTimer() =
-        let _,cancelSource = this.LastRefreshBalancesStamp
-        if not cancelSource.IsCancellationRequested then
-            cancelSource.Cancel()
-            cancelSource.Dispose()
-
-    member private this.ConfigureFiatAmountFrame (normalAccountsBalances: seq<BalanceState>)
-                                                 (readOnlyAccountsBalances: seq<BalanceState>)
-                                                 (readOnly: bool): TapGestureRecognizer =
-        let totalCurrentFiatAmountFrameName,totalOtherFiatAmountFrameName =
-            if readOnly then
-                "totalReadOnlyFiatAmountFrame","totalFiatAmountFrame"
-            else
-                "totalFiatAmountFrame","totalReadOnlyFiatAmountFrame"
-
-        let currentChartViewName,otherChartViewName =
-            if readOnly then
-                "readonlyChartView","normalChartView"
-            else
-                "normalChartView","readonlyChartView"
-
-        let switchingToReadOnly = not readOnly
-
-        let totalCurrentFiatAmountFrame,totalOtherFiatAmountFrame =
-            mainLayout.FindByName<Frame> totalCurrentFiatAmountFrameName,
-            mainLayout.FindByName<Frame> totalOtherFiatAmountFrameName
-
-        let currentChartView,otherChartView =
-            mainLayout.FindByName<DonutChartView> currentChartViewName,
-            mainLayout.FindByName<DonutChartView> otherChartViewName
-
-        let tapGestureRecognizer = TapGestureRecognizer()
-        tapGestureRecognizer.Tapped.Add(fun _ ->
-
-            let shouldNotOpenNewPage =
-                if switchingToReadOnly then
-                    readOnlyAccountsBalances.Any()
-                else
-                    true
-
-            if not CrossConnectivity.IsSupported then
-                failwith "cross connectivity plugin not supported for this platform?"
-            if shouldNotOpenNewPage then
-                Device.BeginInvokeOnMainThread(fun _ ->
-                    totalCurrentFiatAmountFrame.IsVisible <- false
-                    currentChartView.IsVisible <- false
-                    totalOtherFiatAmountFrame.IsVisible <- true
-                    otherChartView.IsVisible <- true
-                )
-                this.AssignColorLabels switchingToReadOnly
-                if not switchingToReadOnly then
-                    this.PopulateBalances switchingToReadOnly normalAccountsBalances
-                else
-                    this.PopulateBalances switchingToReadOnly readOnlyAccountsBalances
-            else
-                let coldStoragePage =
-                    // FIXME: save IsConnected to cache at app startup, and if it has ever been connected to the
-                    // internet, already consider it non-cold storage
-                    use crossConnectivityInstance = CrossConnectivity.Current
-                    if crossConnectivityInstance.IsConnected then
-                        let newBalancesPageFunc = (fun (normalAccountsAndBalances,readOnlyAccountsAndBalances) ->
-                            BalancesPage(state, normalAccountsAndBalances, readOnlyAccountsAndBalances,
-                                         currencyImages, true) :> Page
-                        )
-                        let page = PairingToPage(this, normalAccountsAndBalances, newBalancesPageFunc) :> Page
-                        NavigationPage.SetHasNavigationBar(page, false)
-                        let navPage = NavigationPage page
-                        NavigationPage.SetHasNavigationBar(navPage, false)
-                        navPage :> Page
-                    else
-                        match Account.GetNormalAccountsPairingInfoForWatchWallet() with
-                        | None ->
-                            failwith "Should have ether and utxo accounts if running from the XF Frontend"
-                        | Some walletInfo ->
-                            let walletInfoJson = Marshalling.Serialize walletInfo
-                            let page = PairingFromPage(this, "Copy wallet info to clipboard", walletInfoJson, None)
-                            NavigationPage.SetHasNavigationBar(page, false)
-                            let navPage = NavigationPage page
-                            navPage :> Page
-
-                this.Navigation.PushAsync coldStoragePage
-                     |> FrontendHelpers.DoubleCheckCompletionNonGeneric
-        ) |> ignore
-        totalCurrentFiatAmountFrame.GestureRecognizers.Add tapGestureRecognizer
-        tapGestureRecognizer
-
     member this.PopulateGrid () =
-
-        let tapper = this.ConfigureFiatAmountFrame normalAccountsAndBalances readOnlyAccountsAndBalances false
-        this.ConfigureFiatAmountFrame normalAccountsAndBalances readOnlyAccountsAndBalances true |> ignore
-
         this.PopulateBalances false normalAccountsAndBalances
-
-        if startWithReadOnlyAccounts then
-            tapper.SendTapped null
-
-    member private this.AssignColorLabels (readOnly: bool) =
-        let labels,color =
-            if readOnly then
-                let color = Color.DarkBlue
-                totalReadOnlyFiatAmountLabel.TextColor <- color
-                readOnlyAccountsAndBalances,color
-            else
-                let color = Color.DarkRed
-                totalFiatAmountLabel.TextColor <- color
-                normalAccountsAndBalances,color
-
-        for accountBalance in labels do
-            accountBalance.BalanceSet.CryptoLabel.TextColor <- color
-            accountBalance.BalanceSet.FiatLabel.TextColor <- color
-
-    member private this.CancelBalanceRefreshJobs() =
-        this.BalanceRefreshCancelSources
-            |> Seq.map (fun cancelSource ->
-                            cancelSource.Cancel()
-                            cancelSource.Dispose())
-            |> ignore
-        this.BalanceRefreshCancelSources <- Seq.empty
 
     member private this.Init () =
         normalChartView.DefaultImageSource <- FrontendHelpers.GetSizedImageSource "logo" 512
@@ -563,26 +353,9 @@ type BalancesPage(state: FrontendHelpers.IGlobalAppState,
 
         let allNormalAccountFiatBalances =
             normalAccountsAndBalances.Select(fun balanceState -> balanceState.FiatAmount) |> List.ofSeq
-        let allReadOnlyAccountFiatBalances =
-            readOnlyAccountsAndBalances.Select(fun balanceState -> balanceState.FiatAmount) |> List.ofSeq
 
         Device.BeginInvokeOnMainThread(fun _ ->
-            this.AssignColorLabels true
-            if startWithReadOnlyAccounts then
-                this.AssignColorLabels false
-
             this.PopulateGrid ()
 
             this.UpdateGlobalFiatBalanceSum allNormalAccountFiatBalances totalFiatAmountLabel
-            this.UpdateGlobalFiatBalanceSum allReadOnlyAccountFiatBalances totalReadOnlyFiatAmountLabel
-        )
-
-        this.RefreshBalances true |> FrontendHelpers.DoubleCheckCompletionAsync
-        this.StartTimer()
-
-        state.Resumed.Add (fun _ -> this.StartTimer())
-
-        state.GoneToSleep.Add (fun _ -> 
-            this.StopTimer()
-            this.CancelBalanceRefreshJobs()
         )

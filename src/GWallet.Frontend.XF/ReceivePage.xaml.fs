@@ -22,7 +22,6 @@ type ReceivePage(account: IAccount,
     let _ = base.LoadFromXaml(typeof<ReceivePage>)
 
     let mainLayout = base.FindByName<StackLayout>("mainLayout")
-    let paymentButton = mainLayout.FindByName<Button> "paymentButton"
 
     let paymentCaption = "Send Payment"
     let paymentCaptionInColdStorage = "Signoff Payment Offline"
@@ -72,22 +71,6 @@ type ReceivePage(account: IAccount,
         ) |> ignore
         mainLayout.Children.Add(transactionHistoryButton)
 
-        if not CrossConnectivity.IsSupported then
-            failwith "cross connectivity plugin not supported for this platform?"
-
-        use crossConnectivityInstance = CrossConnectivity.Current
-        if crossConnectivityInstance.IsConnected then
-            paymentButton.Text <- paymentCaption
-            match accountBalance with
-            | Cached(amount,_) ->
-                if (amount > 0m) then
-                    paymentButton.IsEnabled <- true
-            | _ -> ()
-        else
-            paymentButton.Text <- paymentCaptionInColdStorage
-            paymentButton.IsEnabled <- true
-            transactionHistoryButton.IsEnabled <- false
-
         // FIXME: report this Xamarin.Forms Mac backend bug (no back button in navigation pages!, so below <workaround>)
         if (Device.RuntimePlatform <> Device.macOS) then () else
 
@@ -99,26 +82,6 @@ type ReceivePage(account: IAccount,
         ) |> ignore
         mainLayout.Children.Add(backButton)
         //</workaround>
-
-    member this.OnSendPaymentClicked(sender: Object, args: EventArgs) =
-        let newReceivePageFunc = (fun _ ->
-            ReceivePage(account, balancesPage, cryptoBalanceLabelInBalancesPage, fiatBalanceLabelInBalancesPage) :> Page
-        )
-        let sendPage = SendPage(account, this, newReceivePageFunc)
-
-        if paymentButton.Text = paymentCaptionInColdStorage then
-            (sendPage :> FrontendHelpers.IAugmentablePayPage).AddTransactionScanner()
-        elif paymentButton.Text = paymentCaption then
-            ()
-        else
-            failwith "Initialization of ReceivePage() didn't happen?"
-
-        NavigationPage.SetHasNavigationBar(sendPage, false)
-        let navSendPage = NavigationPage sendPage
-        NavigationPage.SetHasNavigationBar(navSendPage, false)
-
-        this.Navigation.PushAsync navSendPage
-            |> FrontendHelpers.DoubleCheckCompletionNonGeneric
 
     member this.OnCopyToClipboardClicked(sender: Object, args: EventArgs) =
         let copyToClipboardButton = base.FindByName<Button>("copyToClipboardButton")
