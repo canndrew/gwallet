@@ -79,7 +79,6 @@
     </Compile>
     <Compile Include="FrontendHelpers.fs" />
     <Compile Include="GlobalState.fs" />
-    <Compile Include="Controls\DonutChartView.fs" />
     <Compile Include="ReceivePage.xaml.fs">
       <DependentUpon>ReceivePage.xaml</DependentUpon>
     </Compile>

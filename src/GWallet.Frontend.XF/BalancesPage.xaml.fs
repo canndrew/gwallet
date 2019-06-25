@@ -8,7 +8,6 @@ open System.Threading.Tasks
 open Xamarin.Forms
 open Xamarin.Forms.Xaml
 open Plugin.Connectivity
-open GWallet.Frontend.XF.Controls
 
 open GWallet.Backend
 
@@ -39,8 +38,6 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
     let totalFiatAmountFrame = mainLayout.FindByName<Frame> "totalFiatAmountFrame"
     let totalReadOnlyFiatAmountFrame = mainLayout.FindByName<Frame> "totalReadOnlyFiatAmountFrame"
     let contentLayout = base.FindByName<StackLayout> "contentLayout"
-    let normalChartView = base.FindByName<DonutChartView> "normalChartView"
-    let readonlyChartView = base.FindByName<DonutChartView> "readonlyChartView"
 
     let standardTimeToRefreshBalances = TimeSpan.FromMinutes 5.0
     let standardTimeToRefreshBalancesWhenThereIsImminentIncomingPaymentOrNotEnoughInfoToKnow = TimeSpan.FromMinutes 1.0
@@ -155,23 +152,6 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
         | Fresh amount | NotFresh (Cached (amount,_)) ->
             amount
 
-    let RedrawDonutView (chartView: DonutChartView) (balances: seq<BalanceState>) =
-        let fullAmount = balances.Sum(fun b -> GetAmountOrDefault b.FiatAmount)
-
-        let chartSourceList = 
-            balances |> Seq.map (fun balanceState ->
-                 let percentage = 
-                     if fullAmount = 0m then
-                         0m
-                     else
-                         GetAmountOrDefault balanceState.FiatAmount / fullAmount
-                 { 
-                     Color = FrontendHelpers.GetCryptoColor balanceState.BalanceSet.Account.Currency
-                     Percentage = float(percentage)
-                 }
-            )
-        chartView.SegmentsSource <- chartSourceList
-
     let GetBaseRefreshInterval() =
         if this.NoImminentIncomingPayment then
             standardTimeToRefreshBalances
@@ -206,11 +186,11 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
          and set value = lock lockObject (fun _ -> balanceRefreshCancelSources <- value)
 
     member this.PopulateBalances (readOnly: bool) (balances: seq<BalanceState>) =
-        let activeCurrencyClassId,inactiveCurrencyClassId,activeChartView =
+        let activeCurrencyClassId,inactiveCurrencyClassId =
             if readOnly then
-                readonlyCryptoBalanceClassId,normalCryptoBalanceClassId,readonlyChartView
+                readonlyCryptoBalanceClassId,normalCryptoBalanceClassId
             else
-                normalCryptoBalanceClassId,readonlyCryptoBalanceClassId,normalChartView
+                normalCryptoBalanceClassId,readonlyCryptoBalanceClassId
 
         let activeCryptoBalances = FindCryptoBalances activeCurrencyClassId 
                                                       contentLayout 
@@ -296,7 +276,6 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
                 contentLayout.Children.Add frame
 
         contentLayout.BatchCommit()
-        RedrawDonutView activeChartView balances
 
     member this.UpdateGlobalFiatBalanceSum (allFiatBalances: seq<MaybeCached<decimal>>) totalFiatAmountLabel =
         let fiatBalancesList = allFiatBalances |> List.ofSeq
@@ -321,7 +300,6 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
                                                                      balanceState.FiatAmount)
                 Device.BeginInvokeOnMainThread(fun _ ->
                     this.UpdateGlobalFiatBalanceSum fiatBalances fiatLabel
-                    RedrawDonutView donutView resolvedBalances
                 )
                 return resolvedBalances.Any(fun balanceState ->
 
@@ -339,8 +317,6 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
         this.PopulateBalances false normalAccountsAndBalances
 
     member private this.Init () =
-        normalChartView.DefaultImageSource <- FrontendHelpers.GetSizedImageSource "logo" 512
-        readonlyChartView.DefaultImageSource <- FrontendHelpers.GetSizedImageSource "logo" 512
         FrontendHelpers.ApplyGtkWorkaroundForFrameTransparentBackgroundColor totalFiatAmountFrame
         FrontendHelpers.ApplyGtkWorkaroundForFrameTransparentBackgroundColor totalReadOnlyFiatAmountFrame
 
