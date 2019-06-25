@@ -320,13 +320,6 @@ type BalancesPage(normalAccountsAndBalances: seq<BalanceState>,
         FrontendHelpers.ApplyGtkWorkaroundForFrameTransparentBackgroundColor totalFiatAmountFrame
         FrontendHelpers.ApplyGtkWorkaroundForFrameTransparentBackgroundColor totalReadOnlyFiatAmountFrame
 
-        let tapGestureRecognizer = TapGestureRecognizer()
-        tapGestureRecognizer.Tapped.Subscribe(fun _ ->
-            Device.OpenUri (Uri "https://www.geewallet.com")
-        ) |> ignore
-        let footerLabel = mainLayout.FindByName<Label> "footerLabel"
-        footerLabel.GestureRecognizers.Add tapGestureRecognizer
-
         let allNormalAccountFiatBalances =
             normalAccountsAndBalances.Select(fun balanceState -> balanceState.FiatAmount) |> List.ofSeq
 

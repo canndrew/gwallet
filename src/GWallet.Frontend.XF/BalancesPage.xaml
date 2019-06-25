@@ -66,10 +66,5 @@
         <ScrollView HorizontalOptions="FillAndExpand">
             <StackLayout x:Name="contentLayout" />
         </ScrollView>
-
-        <Label Text="www.geewallet.com" x:Name="footerLabel"
-               VerticalOptions="End"
-               HorizontalOptions="Center"
-               Margin="0,10,0,10" />
     </StackLayout>
 </ContentPage>
